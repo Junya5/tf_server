@@ -1,5 +1,4 @@
-﻿
-import numpy as np
+﻿import numpy as np
 import keras.backend as K
 
 from keras.models import Model
@@ -15,20 +14,9 @@ from skimage.transform import resize
 from skimage import io, transform, filters, measure, segmentation, morphology
 
 
-# config = tf.ConfigProto()
-# sess = tf.Session(config=config)
-# KTF.set_session(sess)
-
-
-# WEIGHT_DIR = '/Users/xiaolibird/Desktop/机器视觉/DenseNet/output0627_best_weights.h5'
-# BASE_WEIGHT_DIR = '/Users/xiaolibird/Desktop/机器视觉/DenseNet/imagenet_models/densenet121_weights_tf.h5'
-
-# WEIGHT_DIR = '/Users/xiaolibird/Desktop/simple-keras-rest-api/DenseNet/imagenet_models/output0627_best_weights.h5'
-# BASE_WEIGHT_DIR = '/Users/xiaolibird/Desktop/simple-keras-rest-api/DenseNet/imagenet_models/densenet121_weights_tf.h5'
-
 # Windows DIR
-WEIGHT_DIR = ".\\DenseNet\\imagenet_models\\output0627_best_weights.h5"
-BASE_WEIGHT_DIR = ".\\DenseNet\\imagenet_models\\densenet121_weights_tf.h5"
+WEIGHT_DIR = "D:\\TF_server\\tf_server\\DenseNet\\imagenet_models\\output0627_best_weights.h5"
+BASE_WEIGHT_DIR = "D:\\TF_server\\tf_server\\\DenseNet\\imagenet_models\\densenet121_weights_tf.h5"
 
 class MyDenseNet(object):
     """
@@ -71,55 +59,74 @@ class MyDenseNet(object):
         result = {}
         #1
         r = img[:, :, 0]
-        thresh = filters.threshold_otsu(r)
-        bw =morphology.opening(r> thresh, morphology.disk(10))
-        cleared = bw.copy()
-        segmentation.clear_border(cleared)
-        label_image =measure.label(cleared) 
-        regions = measure.regionprops(label_image)
-        for region in regions:
-            if region.area < 100:
-                continue
+        if r.sum() == 0:
+            result['class'] = "NoPredictableImage"
+            result['score'] = 0
+            result['distribution_score'] = 0
+            
+        else:
+            thresh = filters.threshold_otsu(r)
+            bw =morphology.opening(r> thresh, morphology.disk(10))
+            cleared = bw.copy()
+            segmentation.clear_border(cleared)
+            label_image =measure.label(cleared) 
+            regions = measure.regionprops(label_image)
 
-            minr, minc, maxr, maxc = region.bbox
-			#print(minr, minc, maxr, maxc)
-
-        img = img[int(minr*0.8):int(maxr*1.1), int(minc*0.5):int(maxc*1.1)]
-
-        h1 = int((minc+maxc)/2)
-        h2 = int((maxc-minc)/4)
-        w1 = int((minr+maxr)/2)
-        w2 = int((maxr-minr)/4)
-        crop = r[w1-w2:w1+w2, h1-h2:h1+h2]
-        crop_flatten = np.array(crop).flatten()
-
-        ## CDF
-        NumPixel = np.zeros([256])
-        for i in range(len(crop_flatten)):
-            NumPixel[crop_flatten[i]] = NumPixel[crop_flatten[i]]+1
-        CumPixel = np.zeros([256])
-        for k in range(256):
-            if k == 0:
-                CumPixel[k] = NumPixel[k]
+            if len(regions) == 0:
+                result['class'] = "NoPredictableImage"
+                result['score'] = 0
+                result['distribution_score'] = 0
             else:
-                CumPixel[k] = NumPixel[k] + CumPixel[k-1]
-        cmax = np.max(CumPixel)
-        cmin = np.min(CumPixel)
+                max_region = None
+                max_area = 100000
+                for region in regions:
+                    if region.area > max_area:
+                        max_area = region.area
+                        max_region = region
+                
+                if max_region:
+                    minr, minc, maxr, maxc = max_region.bbox
+                    #print(minr, minc, maxr, maxc)
+                    img = img[int(minr*0.8):min(int(maxr*1.1),r.shape[0]), int(minc*0.5):min(int(maxc*1.1),r.shape[1])]
+                    h1 = int((minc+maxc)/2)
+                    h2 = int((maxc-minc)/4)
+                    w1 = int((minr+maxr)/2)
+                    w2 = int((maxr-minr)/4)
+                    crop = r[w1-w2:w1+w2, h1-h2:h1+h2]
+                    crop_flatten = np.array(crop).flatten()
 
-        ### normalization
-        def maxminmormalization(x,Max,Min):
-            x = (x-Min)/(Max-Min)
-            return x
+                    ## CDF
+                    NumPixel = np.zeros([256])
+                    for i in range(len(crop_flatten)):
+                        NumPixel[crop_flatten[i]] = NumPixel[crop_flatten[i]]+1
+                    CumPixel = np.zeros([256])
+                    for k in range(256):
+                        if k == 0:
+                            CumPixel[k] = NumPixel[k]
+                        else:
+                            CumPixel[k] = NumPixel[k] + CumPixel[k-1]
+                    cmax = np.max(CumPixel)
+                    cmin = np.min(CumPixel)
 
-        cumnormal = maxminmormalization(CumPixel,cmax,cmin)
+                    ### normalization
+                    def maxminmormalization(x,Max,Min):
+                        x = (x-Min)/(Max-Min)
+                        return x
 
-		#2
-		#img = img[400:1150, 350:1600, :]
-        img = resize(img, self.input_shape)
-        prediction = self.model.predict(img[np.newaxis, :], batch_size=1)
-        result['score'] = np.max(prediction)
-        result['class'] = self.class_names[np.argmax(prediction)]
-        result['distribution_score'] = np.sum(cumnormal)
+                    cumnormal = maxminmormalization(CumPixel,cmax,cmin)
+
+                    #2
+                    #img = img[400:1150, 350:1600, :]
+                    img = resize(img, self.input_shape)
+                    prediction = self.model.predict(img[np.newaxis, :], batch_size=1)
+                    result['score'] = np.max(prediction)
+                    result['class'] = self.class_names[np.argmax(prediction)]
+                    result['distribution_score'] = np.sum(cumnormal)
+                else:
+                    result['class'] = "NoPredictableImage"
+                    result['score'] = 0
+                    result['distribution_score'] = 0
+        
         return result
 
     def predict_a_batch(self, batch):

@@ -38,6 +38,7 @@ def predict_by_filename():
             data["success"] = True
 
         except Exception as e:
+            print(e)
             data["result"] = "Wrong Image" + path
             # print("nmsl")
             data["success"] = False
